@@ -1,5 +1,10 @@
 import express from "express";
-import { Canvas, createCanvas, loadImage } from "canvas";
+import {
+  Canvas,
+  CanvasRenderingContext2D,
+  createCanvas,
+  loadImage,
+} from "canvas";
 import { WeatherData } from "interfaces";
 import Config from "./config";
 const app = express();
@@ -84,11 +89,66 @@ async function generateImage(canvas: Canvas, weatherData: WeatherData) {
 
   ctx.font = "20px " + Config.mainFontFamily;
   ctx.fillStyle = "#3E3E3E";
-  let windSpeedHight = 90 + ctx.measureText(unit).actualBoundingBoxAscent;
+  let windSpeedY = 90 + ctx.measureText(unit).actualBoundingBoxAscent;
+  let windSpeedX = 250 + temperatureWidth;
   let windSpeed = `Wind: ${currentWeatherData.wind_kph} KMPH`;
-  ctx.fillText(windSpeed, 250 + temperatureWidth, windSpeedHight);
+  ctx.fillText(windSpeed, windSpeedX, windSpeedY);
+  let windSpeedWidth = ctx.measureText(windSpeed).width;
   let humidity = `humidity: ${currentWeatherData.humidity}%`;
-  ctx.fillText(humidity, 250 + temperatureWidth, windSpeedHight + 30);
+  ctx.fillText(humidity, windSpeedX, windSpeedY + 30);
+
+  await drawForecast(ctx, weatherData, windSpeedX + windSpeedWidth, windSpeedY);
+}
+
+async function drawForecast(
+  ctx: CanvasRenderingContext2D,
+  weatherData: WeatherData,
+  startingXcoords: number,
+  y: number
+) {
+  let forecast = weatherData.forecast;
+  let today = forecast.forecastday[0];
+  let lastHourWeather = {
+    code: 0,
+    forLastXhours: 0,
+  };
+  let hours = today?.hour.filter((hour) => {
+    if (hour.time_epoch > weatherData.current.last_updated_epoch) {
+      if (hour.condition.code == lastHourWeather.code) {
+        if (lastHourWeather.forLastXhours < 2) {
+          lastHourWeather.forLastXhours++;
+          return false;
+        } else lastHourWeather.forLastXhours = 0;
+      }
+      lastHourWeather.code = hour.condition.code;
+      return true;
+    }
+    return false;
+  });
+
+  if (typeof hours != "undefined") {
+    let lastTimeInHour = "";
+    for (let i = 0; i < 7 && i < hours.length; i++) {
+      let hour = hours[i];
+      if (!hour) return;
+      let timeInHour = new Date(hour.time_epoch * 1000).toLocaleTimeString([], {
+        timeZone: weatherData.location.tz_id,
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      let image = await loadImage("http:" + hour.condition.icon);
+      let temperature = Math.round(hour.temp_c) + "°C";
+
+      let columnGap = ctx.measureText(lastTimeInHour).width + 30;
+      lastTimeInHour = timeInHour;
+      let x = startingXcoords + 30 + i * columnGap;
+
+      ctx.fillText(timeInHour, x, y);
+      ctx.drawImage(image, x, y, 64, 64);
+      ctx.fillText(temperature, x, y + 80);
+    }
+  }
 }
 
 function dateGenerator(epochTime: number, timeZone: string) {
@@ -99,7 +159,7 @@ function dateGenerator(epochTime: number, timeZone: string) {
     day: "numeric",
     hour: "numeric",
     minute: "numeric",
-    hour12: true,
+    hour12: false,
   }).format(date);
 
   return formattedTime;
