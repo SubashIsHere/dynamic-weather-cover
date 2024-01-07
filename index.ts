@@ -5,7 +5,7 @@ import {
   createCanvas,
   loadImage,
 } from "canvas";
-import { WeatherData } from "interfaces";
+import { Hour, WeatherData } from "interfaces";
 import Config from "./config";
 const app = express();
 const CanvasWidth = 1170;
@@ -26,7 +26,7 @@ app.get("/", async (req, res) => {
 
 async function getWeather(location: string) {
   let key = Config.weatherApiKey;
-  const URI = `https://api.weatherapi.com/v1/forecast.json?key=${key}&q=${location}`;
+  const URI = `https://api.weatherapi.com/v1/forecast.json?key=${key}&q=${location}&days=2`;
   let weatherData = (await (await fetch(URI)).json()) as WeatherData;
   return weatherData;
 }
@@ -107,47 +107,58 @@ async function drawForecast(
   y: number
 ) {
   let forecast = weatherData.forecast;
-  let today = forecast.forecastday[0];
-  let lastHourWeather = {
-    code: 0,
-    forLastXhours: 0,
-  };
-  let hours = today?.hour.filter((hour) => {
-    if (hour.time_epoch > weatherData.current.last_updated_epoch) {
-      if (hour.condition.code == lastHourWeather.code) {
-        if (lastHourWeather.forLastXhours < 2) {
-          lastHourWeather.forLastXhours++;
-          return false;
-        } else lastHourWeather.forLastXhours = 0;
-      }
-      lastHourWeather.code = hour.condition.code;
-      return true;
+  let hoursToShow = 7;
+  let forcastHours: Hour[] = [];
+
+  for (let day = 0; day <= 1; day++) {
+    let forecastDay = forecast.forecastday[day];
+    let prevHourWeather = {
+      code: 0,
+      forLastXhours: 0,
+    };
+    forcastHours = forcastHours.concat(
+      forecastDay?.hour.filter((hour) => {
+        if (hour.time_epoch > weatherData.current.last_updated_epoch) {
+          if (hour.condition.code == prevHourWeather.code) {
+            if (prevHourWeather.forLastXhours < 2) {
+              prevHourWeather.forLastXhours++;
+              return false;
+            } else prevHourWeather.forLastXhours = 0;
+          }
+          prevHourWeather.code = hour.condition.code;
+          return true;
+        }
+        return false;
+      })!
+    );
+
+    if (forcastHours.length > hoursToShow) {
+      forcastHours.splice(hoursToShow);
+      break;
     }
-    return false;
-  });
+  }
 
-  if (typeof hours != "undefined") {
-    let lastTimeInHour = "";
-    for (let i = 0; i < 7 && i < hours.length; i++) {
-      let hour = hours[i];
-      if (!hour) return;
-      let timeInHour = new Date(hour.time_epoch * 1000).toLocaleTimeString([], {
-        timeZone: weatherData.location.tz_id,
-        hour12: false,
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      let image = await loadImage("http:" + hour.condition.icon);
-      let temperature = Math.round(hour.temp_c) + "°C";
+  let prevTimeWidth: number = 0;
+  for (let [i, hour] of forcastHours.entries()) {
+    let timeInHour = new Date(hour.time_epoch * 1000).toLocaleTimeString([], {
+      timeZone: weatherData.location.tz_id,
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
-      let columnGap = ctx.measureText(lastTimeInHour).width + 30;
-      lastTimeInHour = timeInHour;
-      let x = startingXcoords + 30 + i * columnGap;
+    let timeWidth = ctx.measureText(timeInHour).width;
+    let columnGap = prevTimeWidth + 30;
+    prevTimeWidth = timeWidth;
+    let x = startingXcoords + 30 + i * columnGap;
+    if (x + timeWidth > CanvasWidth) return;
 
-      ctx.fillText(timeInHour, x, y);
-      ctx.drawImage(image, x, y, 64, 64);
-      ctx.fillText(temperature, x, y + 80);
-    }
+    let image = await loadImage("http:" + hour.condition.icon);
+    let temperature = Math.round(hour.temp_c) + "°C";
+
+    ctx.fillText(timeInHour, x, y);
+    ctx.drawImage(image, x, y, 64, 64);
+    ctx.fillText(temperature, x, y + 80);
   }
 }
 

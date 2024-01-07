@@ -57,7 +57,7 @@ interface ForecastDay {
   hour: Hour[];
 }
 
-interface Hour {
+export interface Hour {
   time_epoch: number;
   time: string;
   temp_c: number;
